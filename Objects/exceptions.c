@@ -6,6 +6,7 @@
 
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
+#include "frameobject.h"
 #include "internal/mem.h"
 #include "internal/pystate.h"
 #include "structmember.h"
@@ -2412,6 +2413,74 @@ SimpleExtendsException(PyExc_Warning, ResourceWarning,
     "Base class for warnings about resource usage.");
 
 
+/*
+ *    RestartFrame extends Exception
+ */
+
+static PyMemberDef RestartFrame_members[] = {
+        {"frame", T_OBJECT, offsetof(PyRestartFrameObject, frame), 0,
+                PyDoc_STR("frame to restart")},
+        {NULL}  /* Sentinel */
+};
+
+static int
+RestartFrame_init(PyRestartFrameObject *self, PyObject *args, PyObject *kwds)
+{
+    Py_ssize_t size = PyTuple_GET_SIZE(args);
+    PyObject *frame;
+
+    if (BaseException_init((PyBaseExceptionObject *)self, args, kwds) == -1)
+        return -1;
+    Py_CLEAR(self->frame);
+    if (size == 0) {
+        PyErr_SetString(PyExc_TypeError, "frame must be given");
+        return -1;
+    }
+    frame = PyTuple_GET_ITEM(args, 0);
+    if (!PyFrame_Check(frame)) {
+        PyErr_SetString(PyExc_TypeError, "frame must be a frame");
+        return -1;
+    }
+    Py_INCREF(frame);
+    self->frame = frame;
+    return 0;
+}
+
+static int
+RestartFrame_clear(PyRestartFrameObject *self)
+{
+    Py_CLEAR(self->frame);
+    return BaseException_clear((PyBaseExceptionObject *)self);
+}
+
+static void
+RestartFrame_dealloc(PyRestartFrameObject *self)
+{
+    _PyObject_GC_UNTRACK(self);
+    RestartFrame_clear(self);
+    Py_TYPE(self)->tp_free((PyObject *)self);
+}
+
+static int
+RestartFrame_traverse(PyRestartFrameObject *self, visitproc visit, void *arg)
+{
+    Py_VISIT(self->frame);
+    return BaseException_traverse((PyBaseExceptionObject *)self, visit, arg);
+}
+
+ComplexExtendsException(
+        PyExc_Exception,       /* base */
+        RestartFrame,          /* name */
+        RestartFrame,          /* prefix for *_init, etc */
+        0,                     /* new */
+        0,                     /* methods */
+        RestartFrame_members,  /* members */
+        0,                     /* getset */
+        0,                     /* str */
+        "Restart a frame."
+);
+
+
 
 #define PRE_INIT(TYPE) \
     if (!(_PyExc_ ## TYPE.tp_flags & Py_TPFLAGS_READY)) { \
@@ -2548,6 +2617,7 @@ _PyExc_Init(PyObject *bltinmod)
     PRE_INIT(UnicodeWarning)
     PRE_INIT(BytesWarning)
     PRE_INIT(ResourceWarning)
+    PRE_INIT(RestartFrame)
 
     /* OSError subclasses */
     PRE_INIT(ConnectionError)
@@ -2625,6 +2695,7 @@ _PyExc_Init(PyObject *bltinmod)
     POST_INIT(UnicodeWarning)
     POST_INIT(BytesWarning)
     POST_INIT(ResourceWarning)
+    POST_INIT(RestartFrame)
 
     if (!errnomap) {
         errnomap = PyDict_New();

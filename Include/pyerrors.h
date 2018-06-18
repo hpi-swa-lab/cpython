@@ -65,6 +65,11 @@ typedef struct {
     PyObject *value;
 } PyStopIterationObject;
 
+typedef struct {
+    PyException_HEAD
+    PyObject *frame;
+} PyRestartFrameObject;
+
 /* Compatibility typedefs */
 typedef PyOSErrorObject PyEnvironmentErrorObject;
 #ifdef MS_WINDOWS
@@ -233,6 +238,7 @@ PyAPI_DATA(PyObject *) PyExc_UnicodeWarning;
 PyAPI_DATA(PyObject *) PyExc_BytesWarning;
 PyAPI_DATA(PyObject *) PyExc_ResourceWarning;
 
+PyAPI_DATA(PyObject *) PyExc_RestartFrame;
 
 /* Convenience functions */
 
