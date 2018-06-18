@@ -21,6 +21,7 @@
 #include "structmember.h"
 
 #include <ctype.h>
+#include <stdbool.h>
 
 #ifdef Py_DEBUG
 /* For debugging the interpreter: */
@@ -540,11 +541,82 @@ PyEval_EvalFrame(PyFrameObject *f) {
     return PyEval_EvalFrameEx(f, 0);
 }
 
+bool is_matching_restart_frame(PyFrameObject *f) {
+    PyObject *exc_type, *exc_val, *exc_tb;
+    PyErr_Fetch(&exc_type, &exc_val, &exc_tb);
+    bool result = false;
+    if (exc_val) {
+        PyObject *exc_frame = NULL;
+        if (!PyObject_TypeCheck(exc_val, (PyTypeObject *)exc_type)) {
+            PyErr_NormalizeException(&exc_type, &exc_val, &exc_tb);
+            if (!PyObject_TypeCheck(exc_val, (PyTypeObject *)PyExc_RestartFrame)) {
+                PyErr_Restore(exc_type, exc_val, exc_tb);
+                return false;
+            }
+        }
+
+        exc_frame = ((PyRestartFrameObject *)exc_val)->frame;
+        if (f != exc_frame) {
+            PyErr_Restore(exc_type, exc_val, exc_tb);
+            return false;
+        }
+
+        Py_DECREF(exc_val);
+        result = true;
+    }
+
+    Py_XDECREF(exc_type);
+    Py_XDECREF(exc_tb);
+    return result;
+}
+
 PyObject *
 PyEval_EvalFrameEx(PyFrameObject *f, int throwflag)
 {
     PyThreadState *tstate = PyThreadState_GET();
-    return tstate->interp->eval_frame(f, throwflag);
+
+    while (1) {
+        Py_ssize_t extras = Py_SIZE(f);
+        PyFrameObject *copy = PyObject_GC_NewVar(PyFrameObject, &PyFrame_Type, extras);
+#define COPY_ATTR(name) copy->f_ ## name = f->f_ ## name
+        COPY_ATTR(back);
+        COPY_ATTR(code);
+        COPY_ATTR(builtins);
+        COPY_ATTR(globals);
+        COPY_ATTR(locals);
+        if (f->f_valuestack == NULL) {
+            COPY_ATTR(valuestack);
+        } else {
+            copy->f_valuestack = copy->f_localsplus + (f->f_valuestack - f->f_localsplus);
+        }
+        if (f->f_stacktop == NULL) {
+            COPY_ATTR(stacktop);
+        } else {
+            copy->f_stacktop = copy->f_localsplus + (f->f_stacktop - f->f_localsplus);
+        }
+        COPY_ATTR(trace);
+        COPY_ATTR(trace_lines);
+        COPY_ATTR(trace_opcodes);
+        COPY_ATTR(gen);
+        COPY_ATTR(lasti);
+        COPY_ATTR(lineno);
+        COPY_ATTR(iblock);
+        COPY_ATTR(executing);
+        memcpy(copy->f_blockstack, f->f_blockstack,
+               sizeof(PyTryBlock) * CO_MAXBLOCKS);
+        memcpy(copy->f_localsplus, f->f_localsplus,
+               sizeof(f->f_localsplus[0]) * extras);
+
+        PyObject *retval = tstate->interp->eval_frame(f, throwflag);
+        if (retval != NULL || !PyErr_ExceptionMatches(PyExc_RestartFrame) ||
+               !is_matching_restart_frame(f)) {
+            return retval;
+        }
+
+        PyErr_Clear();
+        fprintf(stderr, "Restarting frame %p\n", f);
+        f = copy;
+    }
 }
 
 PyObject* _Py_HOT_FUNCTION
