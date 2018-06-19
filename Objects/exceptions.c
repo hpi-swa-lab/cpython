@@ -2418,8 +2418,10 @@ SimpleExtendsException(PyExc_Warning, ResourceWarning,
  */
 
 static PyMemberDef RestartFrame_members[] = {
-        {"frame", T_OBJECT, offsetof(PyRestartFrameObject, frame), 0,
+        {"frame", T_OBJECT_EX, offsetof(PyRestartFrameObject, frame), READONLY,
                 PyDoc_STR("frame to restart")},
+        {"new_code", T_OBJECT_EX, offsetof(PyRestartFrameObject, new_code), READONLY,
+                PyDoc_STR("new code object for restarted frame")},
         {NULL}  /* Sentinel */
 };
 
@@ -2428,21 +2430,36 @@ RestartFrame_init(PyRestartFrameObject *self, PyObject *args, PyObject *kwds)
 {
     Py_ssize_t size = PyTuple_GET_SIZE(args);
     PyObject *frame;
+    PyObject *new_code = Py_None;
 
     if (BaseException_init((PyBaseExceptionObject *)self, args, kwds) == -1)
         return -1;
+
     Py_CLEAR(self->frame);
+    Py_CLEAR(self->new_code);
+
     if (size == 0) {
         PyErr_SetString(PyExc_TypeError, "frame must be given");
         return -1;
     }
     frame = PyTuple_GET_ITEM(args, 0);
     if (!PyFrame_Check(frame)) {
-        PyErr_SetString(PyExc_TypeError, "frame must be a frame");
+        PyErr_SetString(PyExc_TypeError, "frame must be a frame object");
         return -1;
     }
+
+    if (size > 1) {
+        new_code = PyTuple_GET_ITEM(args, 1);
+        if (!(new_code == Py_None || PyCode_Check(new_code))) {
+            PyErr_SetString(PyExc_TypeError, "new_code must be a code object or None");
+            return -1;
+        }
+    }
+
     Py_INCREF(frame);
+    Py_INCREF(new_code);
     self->frame = frame;
+    self->new_code = new_code;
     return 0;
 }
 
@@ -2450,6 +2467,7 @@ static int
 RestartFrame_clear(PyRestartFrameObject *self)
 {
     Py_CLEAR(self->frame);
+    Py_CLEAR(self->new_code);
     return BaseException_clear((PyBaseExceptionObject *)self);
 }
 
@@ -2465,6 +2483,7 @@ static int
 RestartFrame_traverse(PyRestartFrameObject *self, visitproc visit, void *arg)
 {
     Py_VISIT(self->frame);
+    Py_VISIT(self->new_code);
     return BaseException_traverse((PyBaseExceptionObject *)self, visit, arg);
 }
 
@@ -2477,7 +2496,7 @@ ComplexExtendsException(
         RestartFrame_members,  /* members */
         0,                     /* getset */
         0,                     /* str */
-        "Restart a frame."
+        "Restart a frame and optionally patch its code."
 );
 
 

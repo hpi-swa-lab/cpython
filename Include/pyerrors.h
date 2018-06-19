@@ -68,6 +68,7 @@ typedef struct {
 typedef struct {
     PyException_HEAD
     PyObject *frame;
+    PyObject *new_code;
 } PyRestartFrameObject;
 
 /* Compatibility typedefs */
