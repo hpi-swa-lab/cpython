@@ -578,43 +578,29 @@ bool is_matching_restart_frame(PyFrameObject *f, PyCodeObject **new_code) {
     return result;
 }
 
+void copy_frame(PyFrameObject *from, PyFrameObject *to) {
+    Py_ssize_t extra_size = Py_SIZE(from);
+    // Copy everything but the PyObject_VAR_HEAD.
+    // Relies on f_back being the first attribute in PyFrameObject.
+    memcpy(&to->f_back, &from->f_back,
+           sizeof(PyFrameObject) + extra_size - offsetof(PyFrameObject, f_back));
+    if (from->f_valuestack != NULL) {
+        to->f_valuestack = to->f_localsplus + (from->f_valuestack - from->f_localsplus);
+    }
+
+    if (from->f_stacktop != NULL) {
+        to->f_stacktop = to->f_localsplus + (from->f_stacktop - from->f_localsplus);
+    }
+}
+
 PyObject *
 PyEval_EvalFrameEx(PyFrameObject *f, int throwflag)
 {
     PyThreadState *tstate = PyThreadState_GET();
+    PyFrameObject *backup = PyObject_GC_NewVar(PyFrameObject, &PyFrame_Type, Py_SIZE(f));
+    copy_frame(f, backup);
 
     while (1) {
-        Py_ssize_t extras = Py_SIZE(f);
-        PyFrameObject *copy = PyObject_GC_NewVar(PyFrameObject, &PyFrame_Type, extras);
-#define COPY_ATTR(name) copy->f_ ## name = f->f_ ## name
-        COPY_ATTR(back);
-        COPY_ATTR(code);
-        COPY_ATTR(builtins);
-        COPY_ATTR(globals);
-        COPY_ATTR(locals);
-        if (f->f_valuestack == NULL) {
-            COPY_ATTR(valuestack);
-        } else {
-            copy->f_valuestack = copy->f_localsplus + (f->f_valuestack - f->f_localsplus);
-        }
-        if (f->f_stacktop == NULL) {
-            COPY_ATTR(stacktop);
-        } else {
-            copy->f_stacktop = copy->f_localsplus + (f->f_stacktop - f->f_localsplus);
-        }
-        COPY_ATTR(trace);
-        COPY_ATTR(trace_lines);
-        COPY_ATTR(trace_opcodes);
-        COPY_ATTR(gen);
-        COPY_ATTR(lasti);
-        COPY_ATTR(lineno);
-        COPY_ATTR(iblock);
-        COPY_ATTR(executing);
-        memcpy(copy->f_blockstack, f->f_blockstack,
-               sizeof(PyTryBlock) * CO_MAXBLOCKS);
-        memcpy(copy->f_localsplus, f->f_localsplus,
-               sizeof(f->f_localsplus[0]) * extras);
-
         PyObject *retval = tstate->interp->eval_frame(f, throwflag);
         PyCodeObject *new_code;
         if (retval != NULL || !PyErr_ExceptionMatches(PyExc_RestartFrame) ||
@@ -623,13 +609,13 @@ PyEval_EvalFrameEx(PyFrameObject *f, int throwflag)
         }
 
         PyErr_Clear();
+        copy_frame(backup, f);
         if (new_code != NULL) {
-            copy->f_code = new_code;
+            f->f_code = new_code;
             fprintf(stderr, "Restarting frame %p with new code object %p\n", f, new_code);
         } else {
             fprintf(stderr, "Restarting frame %p\n", f);
         }
-        f = copy;
     }
 }
 
