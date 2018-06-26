@@ -541,12 +541,11 @@ PyEval_EvalFrame(PyFrameObject *f) {
     return PyEval_EvalFrameEx(f, 0);
 }
 
-bool is_matching_restart_frame(PyFrameObject *f) {
+bool is_matching_restart_frame(PyFrameObject *f, PyCodeObject **new_code) {
     PyObject *exc_type, *exc_val, *exc_tb;
     PyErr_Fetch(&exc_type, &exc_val, &exc_tb);
     bool result = false;
     if (exc_val) {
-        PyObject *exc_frame = NULL;
         if (!PyObject_TypeCheck(exc_val, (PyTypeObject *)exc_type)) {
             PyErr_NormalizeException(&exc_type, &exc_val, &exc_tb);
             if (!PyObject_TypeCheck(exc_val, (PyTypeObject *)PyExc_RestartFrame)) {
@@ -555,10 +554,19 @@ bool is_matching_restart_frame(PyFrameObject *f) {
             }
         }
 
-        exc_frame = ((PyRestartFrameObject *)exc_val)->frame;
-        if (f != exc_frame) {
+        PyRestartFrameObject *exc = (PyRestartFrameObject *)exc_val;
+        assert(PyFrame_Check(exc->frame));
+        if (f != (PyFrameObject *)exc->frame) {
             PyErr_Restore(exc_type, exc_val, exc_tb);
             return false;
+        }
+
+        if (exc->new_code == Py_None) {
+            *new_code = NULL;
+        } else {
+            assert(PyCode_Check(exc->new_code));
+            Py_INCREF(exc->new_code);
+            *new_code = (PyCodeObject *)exc->new_code;
         }
 
         Py_DECREF(exc_val);
@@ -608,13 +616,19 @@ PyEval_EvalFrameEx(PyFrameObject *f, int throwflag)
                sizeof(f->f_localsplus[0]) * extras);
 
         PyObject *retval = tstate->interp->eval_frame(f, throwflag);
+        PyCodeObject *new_code;
         if (retval != NULL || !PyErr_ExceptionMatches(PyExc_RestartFrame) ||
-               !is_matching_restart_frame(f)) {
+               !is_matching_restart_frame(f, &new_code)) {
             return retval;
         }
 
         PyErr_Clear();
-        fprintf(stderr, "Restarting frame %p\n", f);
+        if (new_code != NULL) {
+            copy->f_code = new_code;
+            fprintf(stderr, "Restarting frame %p with new code object %p\n", f, new_code);
+        } else {
+            fprintf(stderr, "Restarting frame %p\n", f);
+        }
         f = copy;
     }
 }
