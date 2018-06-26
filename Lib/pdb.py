@@ -1424,9 +1424,9 @@ class Pdb(bdb.Bdb, cmd.Cmd):
     def complete_unalias(self, text, line, begidx, endidx):
         return [a for a in self.aliases if a.startswith(text)]
 
-    def do_restart(self, arg):
-        """restart [level]
-        Restart the level-th parent frame of the current frame.
+    def do_restartf(self, arg):
+        """restart [n=0]
+        Restart the nth parent frame of the current frame.
         """
         frame = self.curframe
         if arg:
@@ -1437,7 +1437,7 @@ class Pdb(bdb.Bdb, cmd.Cmd):
 
     # List of all the commands making the program resume execution.
     commands_resuming = ['do_continue', 'do_step', 'do_next', 'do_return',
-                         'do_quit', 'do_jump', 'do_restart']
+                         'do_quit', 'do_jump', 'do_restartf']
 
     # Print a traceback starting at the top stack frame.
     # The most recently entered frame is printed last;
@@ -1585,7 +1585,7 @@ if __doc__ is not None:
         'enable', 'ignore', 'condition', 'commands', 'step', 'next', 'until',
         'jump', 'return', 'retval', 'run', 'continue', 'list', 'longlist',
         'args', 'p', 'pp', 'whatis', 'source', 'display', 'undisplay',
-        'interact', 'alias', 'unalias', 'debug', 'quit', 'restart',
+        'interact', 'alias', 'unalias', 'debug', 'quit', 'restartf',
     ]
 
     for _command in _help_order:

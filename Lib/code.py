@@ -88,7 +88,7 @@ class InteractiveInterpreter:
         """
         try:
             exec(code, self.locals)
-        except SystemExit:
+        except (SystemExit, RestartFrame):
             raise
         except:
             self.showtraceback()
