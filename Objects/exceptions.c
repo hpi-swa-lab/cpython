@@ -7,6 +7,7 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include "frameobject.h"
+#include "funcobject.h"
 #include "internal/mem.h"
 #include "internal/pystate.h"
 #include "structmember.h"
@@ -2450,8 +2451,20 @@ RestartFrame_init(PyRestartFrameObject *self, PyObject *args, PyObject *kwds)
 
     if (size > 1) {
         new_code = PyTuple_GET_ITEM(args, 1);
-        if (!(new_code == Py_None || PyCode_Check(new_code))) {
-            PyErr_SetString(PyExc_TypeError, "new_code must be a code object or None");
+        // Mirrors the logic of call_function in ceval.c
+        if (PyMethod_Check(new_code)) {
+            new_code = PyMethod_GET_FUNCTION(new_code);
+        }
+
+        // Unfortunately, other callables like classes don't expose code objects.
+        if (PyFunction_Check(new_code)) {
+            new_code = PyFunction_GET_CODE(new_code);
+        } else if (PyCFunction_Check(new_code) || Py_TYPE(new_code) == &PyMethodDescr_Type) {
+            PyErr_SetString(PyExc_TypeError, "new_code cannot be a builtin");
+            return -1;
+        } else if (!(new_code == Py_None || PyCode_Check(new_code))) {
+            PyErr_SetString(PyExc_TypeError,
+                            "new_code must be a code object, function or None");
             return -1;
         }
     }
