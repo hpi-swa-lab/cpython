@@ -578,12 +578,10 @@ bool is_matching_restart_frame(PyFrameObject *f, PyCodeObject **new_code) {
     return result;
 }
 
-void copy_frame(PyFrameObject *from, PyFrameObject *to) {
-    Py_ssize_t extra_size = Py_SIZE(from);
+void copy_frame(PyFrameObject *from, PyFrameObject *to, size_t size) {
     // Copy everything but the PyObject_VAR_HEAD.
-    // Relies on f_back being the first attribute in PyFrameObject.
-    memcpy(&to->f_back, &from->f_back,
-           sizeof(PyFrameObject) + extra_size - offsetof(PyFrameObject, f_back));
+    memcpy((char*)to + sizeof(PyVarObject), (char*)from + sizeof(PyVarObject),
+            size - sizeof(PyVarObject));
     if (from->f_valuestack != NULL) {
         to->f_valuestack = to->f_localsplus + (from->f_valuestack - from->f_localsplus);
     }
@@ -597,19 +595,25 @@ PyObject *
 PyEval_EvalFrameEx(PyFrameObject *f, int throwflag)
 {
     PyThreadState *tstate = PyThreadState_GET();
-    PyFrameObject *backup = PyObject_GC_NewVar(PyFrameObject, &PyFrame_Type, Py_SIZE(f));
-    copy_frame(f, backup);
+    // Creates an unitialized frame object. Using initialized frame objects
+    // doesn't work unless we also increase the refcount of all objects the
+    // frame references.
+    size_t size = _PyObject_VAR_SIZE(&PyFrame_Type, Py_SIZE(f));
+    PyFrameObject *backup = (PyFrameObject *) PyMem_MALLOC(size);
+    assert(backup != NULL);
+    copy_frame(f, backup, size);
 
     while (1) {
         PyObject *retval = tstate->interp->eval_frame(f, throwflag);
         PyCodeObject *new_code;
         if (retval != NULL || !PyErr_ExceptionMatches(PyExc_RestartFrame) ||
                !is_matching_restart_frame(f, &new_code)) {
+            PyMem_FREE(backup);
             return retval;
         }
 
         PyErr_Clear();
-        copy_frame(backup, f);
+        copy_frame(backup, f, size);
         if (new_code != NULL) {
             f->f_code = new_code;
             fprintf(stderr, "Restarting frame %p with new code object %p\n", f, new_code);
