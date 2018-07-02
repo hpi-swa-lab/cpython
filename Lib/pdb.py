@@ -1375,6 +1375,7 @@ class Pdb(bdb.Bdb, cmd.Cmd):
         """
         ns = self.curframe.f_globals.copy()
         ns.update(self.curframe_locals)
+        ns['restartf'] = self._restart_frame
         code.interact("*interactive*", local=ns)
 
     def do_alias(self, arg):
@@ -1424,16 +1425,19 @@ class Pdb(bdb.Bdb, cmd.Cmd):
     def complete_unalias(self, text, line, begidx, endidx):
         return [a for a in self.aliases if a.startswith(text)]
 
+    def _restart_frame(self, n=0, code=None):
+        frame = self.curframe
+        for _ in range(n):
+            frame = frame.f_back
+        raise RestartFrame(frame, code)
+
     def do_restartf(self, arg):
         """restart [n=0]
         Restart the nth parent frame of the current frame.
         """
         frame = self.curframe
-        if arg:
-            levels = int(arg)
-            for _ in range(levels):
-                frame = frame.f_back
-        raise RestartFrame(frame)
+        levels = int(arg) if arg else 0
+        self._restart_frame(levels)
 
     # List of all the commands making the program resume execution.
     commands_resuming = ['do_continue', 'do_step', 'do_next', 'do_return',
