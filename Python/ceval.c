@@ -593,7 +593,7 @@ PyObject *
 PyEval_EvalFrameEx(PyFrameObject *f, int throwflag)
 {
     PyThreadState *tstate = PyThreadState_GET();
-    // Creates an unitialized frame object. Using initialized frame objects
+    // Creates an uninitialized frame object. Using initialized frame objects
     // doesn't work unless we also increase the refcount of all objects the
     // frame references.
     size_t size = _PyObject_VAR_SIZE(&PyFrame_Type, Py_SIZE(f));
