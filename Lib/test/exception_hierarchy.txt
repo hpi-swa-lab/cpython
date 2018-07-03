@@ -5,6 +5,7 @@ BaseException
  +-- Exception
       +-- StopIteration
       +-- StopAsyncIteration
+      +-- RestartFrame
       +-- ArithmeticError
       |    +-- FloatingPointError
       |    +-- OverflowError
