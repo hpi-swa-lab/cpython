@@ -561,9 +561,7 @@ bool is_matching_restart_frame(PyFrameObject *f, PyCodeObject **new_code) {
             return false;
         }
 
-        if (exc->new_code == Py_None) {
-            *new_code = NULL;
-        } else {
+        if (exc->new_code != Py_None) {
             assert(PyCode_Check(exc->new_code));
             Py_INCREF(exc->new_code);
             *new_code = (PyCodeObject *)exc->new_code;
@@ -605,21 +603,14 @@ PyEval_EvalFrameEx(PyFrameObject *f, int throwflag)
 
     while (1) {
         PyObject *retval = tstate->interp->eval_frame(f, throwflag);
-        PyCodeObject *new_code;
         if (retval != NULL || !PyErr_ExceptionMatches(PyExc_RestartFrame) ||
-               !is_matching_restart_frame(f, &new_code)) {
+               !is_matching_restart_frame(f, &backup->f_code)) {
             PyMem_FREE(backup);
             return retval;
         }
 
         PyErr_Clear();
         copy_frame(backup, f, size);
-        if (new_code != NULL) {
-            f->f_code = new_code;
-            fprintf(stderr, "Restarting frame %p with new code object %p\n", f, new_code);
-        } else {
-            fprintf(stderr, "Restarting frame %p\n", f);
-        }
     }
 }
 
