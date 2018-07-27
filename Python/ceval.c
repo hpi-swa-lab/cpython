@@ -576,16 +576,85 @@ bool is_matching_restart_frame(PyFrameObject *f, PyCodeObject **new_code) {
     return result;
 }
 
-void copy_frame(PyFrameObject *from, PyFrameObject *to, size_t size) {
-    // Copy everything but the PyObject_VAR_HEAD.
-    memcpy((char*)to + sizeof(PyVarObject), (char*)from + sizeof(PyVarObject),
-            size - sizeof(PyVarObject));
-    if (from->f_valuestack != NULL) {
-        to->f_valuestack = to->f_localsplus + (from->f_valuestack - from->f_localsplus);
+PyFrameObject * make_frame_backup(PyFrameObject *f) {
+    // TODO: Use frame free list and zombie frames
+    PyFrameObject *backup = PyObject_GC_NewVar(PyFrameObject, &PyFrame_Type, Py_SIZE(f));
+    assert(backup != NULL);
+
+    backup->f_back = f->f_back;
+    Py_XINCREF(backup->f_back);
+    backup->f_code = f->f_code;
+    Py_INCREF(backup->f_code);
+    backup->f_builtins = f->f_builtins;
+    Py_INCREF(backup->f_builtins);
+    backup->f_globals = f->f_globals;
+    Py_INCREF(backup->f_globals);
+    backup->f_locals = f->f_locals;
+    Py_XINCREF(backup->f_locals);
+    backup->f_trace = f->f_trace;
+    Py_XINCREF(backup->f_trace);
+    backup->f_trace_lines = f->f_trace_lines;
+    backup->f_trace_opcodes = f->f_trace_opcodes;
+    // Reference is borrowed, no need to incref
+    backup->f_gen = f->f_gen;
+    backup->f_lasti = f->f_lasti;
+    backup->f_lineno = f->f_lineno;
+    backup->f_iblock = f->f_iblock;
+    backup->f_executing = f->f_executing;
+    memcpy(backup->f_blockstack, f->f_blockstack, CO_MAXBLOCKS * sizeof(PyTryBlock));
+    backup->f_valuestack = backup->f_localsplus + (f->f_valuestack - f->f_localsplus);
+    for (PyObject **p = f->f_localsplus, **q = backup->f_localsplus; p < f->f_valuestack; ++p, ++q) {
+        Py_XINCREF(*p);
+        *q = *p;
     }
 
-    if (from->f_stacktop != NULL) {
-        to->f_stacktop = to->f_localsplus + (from->f_stacktop - from->f_localsplus);
+    if (f->f_stacktop == NULL) {
+        backup->f_stacktop = NULL;
+    } else {
+        backup->f_stacktop = backup->f_localsplus + (f->f_stacktop - f->f_localsplus);
+        for (PyObject **p = f->f_valuestack, **q = backup->f_valuestack; p < f->f_stacktop; ++p, ++q) {
+            Py_XINCREF(*p);
+            *q = *p;
+        }
+    }
+
+    return backup;
+}
+
+PyObject *
+PyEval_EvalFrameRestartable(PyFrameObject *f, int throwflag) {
+    PyThreadState *tstate = PyThreadState_GET();
+    assert(tstate != NULL);
+
+    while (1) {
+        PyFrameObject *backup = make_frame_backup(f);
+        PyObject *retval = tstate->interp->eval_frame(f, throwflag);
+        PyCodeObject *new_code = NULL;
+
+        if (Py_REFCNT(f) > 1) {
+            Py_DECREF(f);
+            _PyObject_GC_TRACK(f);
+        }
+        else {
+            ++tstate->recursion_depth;
+            Py_DECREF(f);
+            --tstate->recursion_depth;
+        }
+
+        if (retval != NULL || !PyErr_ExceptionMatches(PyExc_RestartFrame) ||
+                !is_matching_restart_frame(f, &new_code)) {
+            ++tstate->recursion_depth;
+            Py_DECREF(backup);
+            --tstate->recursion_depth;
+            return retval;
+        }
+
+        if (new_code != NULL) {
+            Py_DECREF(backup->f_code);
+            backup->f_code = new_code;
+        }
+
+        f = backup;
     }
 }
 
@@ -593,25 +662,7 @@ PyObject *
 PyEval_EvalFrameEx(PyFrameObject *f, int throwflag)
 {
     PyThreadState *tstate = PyThreadState_GET();
-    // Creates an uninitialized frame object. Using initialized frame objects
-    // doesn't work unless we also increase the refcount of all objects the
-    // frame references.
-    size_t size = _PyObject_VAR_SIZE(&PyFrame_Type, Py_SIZE(f));
-    PyFrameObject *backup = (PyFrameObject *) PyMem_MALLOC(size);
-    assert(backup != NULL);
-    copy_frame(f, backup, size);
-
-    while (1) {
-        PyObject *retval = tstate->interp->eval_frame(f, throwflag);
-        if (retval != NULL || !PyErr_ExceptionMatches(PyExc_RestartFrame) ||
-               !is_matching_restart_frame(f, &backup->f_code)) {
-            PyMem_FREE(backup);
-            return retval;
-        }
-
-        PyErr_Clear();
-        copy_frame(backup, f, size);
-    }
+    return tstate->interp->eval_frame(f, throwflag);
 }
 
 PyObject* _Py_HOT_FUNCTION
@@ -3731,7 +3782,6 @@ _PyEval_EvalCodeWithName(PyObject *_co, PyObject *globals, PyObject *locals,
 {
     PyCodeObject* co = (PyCodeObject*)_co;
     PyFrameObject *f;
-    PyObject *retval = NULL;
     PyObject **fastlocals, **freevars;
     PyThreadState *tstate;
     PyObject *x, *u;
@@ -3987,7 +4037,7 @@ _PyEval_EvalCodeWithName(PyObject *_co, PyObject *globals, PyObject *locals,
         return gen;
     }
 
-    retval = PyEval_EvalFrameEx(f,0);
+    return PyEval_EvalFrameRestartable(f,0);
 
 fail: /* Jump here from prelude on failure */
 
@@ -4006,7 +4056,7 @@ fail: /* Jump here from prelude on failure */
         Py_DECREF(f);
         --tstate->recursion_depth;
     }
-    return retval;
+    return NULL;
 }
 
 PyObject *
