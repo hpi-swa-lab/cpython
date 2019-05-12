@@ -541,20 +541,25 @@ PyEval_EvalFrame(PyFrameObject *f) {
     return PyEval_EvalFrameEx(f, 0);
 }
 
-bool is_matching_restart_frame(PyFrameObject *f, PyCodeObject **new_code) {
+bool is_matching_restart_frame(PyFrameObject *f, PyCodeObject **new_code)
+{
     PyObject *exc_type, *exc_val, *exc_tb;
-    PyErr_Fetch(&exc_type, &exc_val, &exc_tb);
+    PyRestartFrameObject *exc;
     bool result = false;
+
+    PyErr_Fetch(&exc_type, &exc_val, &exc_tb);
     if (exc_val) {
         if (!PyObject_TypeCheck(exc_val, (PyTypeObject *)exc_type)) {
             PyErr_NormalizeException(&exc_type, &exc_val, &exc_tb);
-            if (!PyObject_TypeCheck(exc_val, (PyTypeObject *)PyExc_RestartFrame)) {
+            if (!PyObject_TypeCheck(exc_val,
+                                    (PyTypeObject *)PyExc_RestartFrame))
+            {
                 PyErr_Restore(exc_type, exc_val, exc_tb);
                 return false;
             }
         }
 
-        PyRestartFrameObject *exc = (PyRestartFrameObject *)exc_val;
+        exc = (PyRestartFrameObject *)exc_val;
         assert(PyFrame_Check(exc->frame));
         if (f != (PyFrameObject *)exc->frame) {
             PyErr_Restore(exc_type, exc_val, exc_tb);
@@ -576,9 +581,15 @@ bool is_matching_restart_frame(PyFrameObject *f, PyCodeObject **new_code) {
     return result;
 }
 
-PyFrameObject * make_frame_backup(PyFrameObject *f) {
+PyFrameObject * make_frame_backup(PyFrameObject *f)
+{
     // TODO: Use frame free list and zombie frames
-    PyFrameObject *backup = PyObject_GC_NewVar(PyFrameObject, &PyFrame_Type, Py_SIZE(f));
+    PyFrameObject *backup = PyObject_GC_NewVar(PyFrameObject, &PyFrame_Type,
+                                               Py_SIZE(f));
+    size_t locals_end_offset = f->f_valuestack - f->f_localsplus;
+    size_t stack_end_offset = f->f_stacktop - f->f_localsplus;
+    PyObject **p, **q;
+
     assert(backup != NULL);
 
     backup->f_back = f->f_back;
@@ -601,20 +612,26 @@ PyFrameObject * make_frame_backup(PyFrameObject *f) {
     backup->f_lineno = f->f_lineno;
     backup->f_iblock = f->f_iblock;
     backup->f_executing = f->f_executing;
-    memcpy(backup->f_blockstack, f->f_blockstack, CO_MAXBLOCKS * sizeof(PyTryBlock));
-    backup->f_valuestack = backup->f_localsplus + (f->f_valuestack - f->f_localsplus);
-    for (PyObject **p = f->f_localsplus, **q = backup->f_localsplus; p < f->f_valuestack; ++p, ++q) {
+    memcpy(backup->f_blockstack, f->f_blockstack,
+           CO_MAXBLOCKS * sizeof(PyTryBlock));
+    backup->f_valuestack = backup->f_localsplus + locals_end_offset;
+
+    p = f->f_localsplus;
+    q = backup->f_localsplus;
+    while (p < f->f_valuestack) {
         Py_XINCREF(*p);
-        *q = *p;
+        *q++ = *p++;
     }
 
     if (f->f_stacktop == NULL) {
         backup->f_stacktop = NULL;
     } else {
-        backup->f_stacktop = backup->f_localsplus + (f->f_stacktop - f->f_localsplus);
-        for (PyObject **p = f->f_valuestack, **q = backup->f_valuestack; p < f->f_stacktop; ++p, ++q) {
+        backup->f_stacktop = backup->f_localsplus + stack_end_offset;
+        p = f->f_valuestack;
+        q = backup->f_valuestack;
+        while (p < f->f_stacktop) {
             Py_XINCREF(*p);
-            *q = *p;
+            *q++ = *p++;
         }
     }
 
@@ -622,14 +639,18 @@ PyFrameObject * make_frame_backup(PyFrameObject *f) {
 }
 
 PyObject *
-PyEval_EvalFrameRestartable(PyFrameObject *f, int throwflag) {
+PyEval_EvalFrameRestartable(PyFrameObject *f, int throwflag)
+{
     PyThreadState *tstate = PyThreadState_GET();
-    assert(tstate != NULL);
+    PyFrameObject *backup;
+    PyObject *retval;
+    PyCodeObject *new_code;
 
+    assert(tstate != NULL);
     while (1) {
-        PyFrameObject *backup = make_frame_backup(f);
-        PyObject *retval = tstate->interp->eval_frame(f, throwflag);
-        PyCodeObject *new_code = NULL;
+        backup = make_frame_backup(f);
+        retval = tstate->interp->eval_frame(f, throwflag);
+        new_code = NULL;
 
         if (Py_REFCNT(f) > 1) {
             Py_DECREF(f);
@@ -642,7 +663,8 @@ PyEval_EvalFrameRestartable(PyFrameObject *f, int throwflag) {
         }
 
         if (retval != NULL || !PyErr_ExceptionMatches(PyExc_RestartFrame) ||
-                !is_matching_restart_frame(f, &new_code)) {
+            !is_matching_restart_frame(f, &new_code))
+        {
             ++tstate->recursion_depth;
             Py_DECREF(backup);
             --tstate->recursion_depth;

@@ -2421,8 +2421,8 @@ SimpleExtendsException(PyExc_Warning, ResourceWarning,
 static PyMemberDef RestartFrame_members[] = {
         {"frame", T_OBJECT_EX, offsetof(PyRestartFrameObject, frame), READONLY,
                 PyDoc_STR("frame to restart")},
-        {"new_code", T_OBJECT_EX, offsetof(PyRestartFrameObject, new_code), READONLY,
-                PyDoc_STR("new code object for restarted frame")},
+        {"new_code", T_OBJECT_EX, offsetof(PyRestartFrameObject, new_code),
+                READONLY, PyDoc_STR("new code object for restarted frame")},
         {NULL}  /* Sentinel */
 };
 
@@ -2456,10 +2456,11 @@ RestartFrame_init(PyRestartFrameObject *self, PyObject *args, PyObject *kwds)
             new_code = PyMethod_GET_FUNCTION(new_code);
         }
 
-        // Unfortunately, other callables like classes don't expose code objects.
         if (PyFunction_Check(new_code)) {
             new_code = PyFunction_GET_CODE(new_code);
-        } else if (PyCFunction_Check(new_code) || Py_TYPE(new_code) == &PyMethodDescr_Type) {
+        } else if (PyCFunction_Check(new_code) ||
+                   Py_TYPE(new_code) == &PyMethodDescr_Type)
+        {
             PyErr_SetString(PyExc_TypeError, "new_code cannot be a builtin");
             return -1;
         } else if (!(new_code == Py_None || PyCode_Check(new_code))) {
