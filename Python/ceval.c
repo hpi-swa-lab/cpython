@@ -15,6 +15,7 @@
 #include "code.h"
 #include "dictobject.h"
 #include "frameobject.h"
+#include "longobject.h"
 #include "opcode.h"
 #include "pydtrace.h"
 #include "setobject.h"
@@ -645,6 +646,8 @@ PyEval_EvalFrameRestartable(PyFrameObject *f, int throwflag)
     PyFrameObject *backup;
     PyObject *retval;
     PyCodeObject *new_code;
+    PyObject *code_as_long;
+    int set_item_result;
 
     assert(tstate != NULL);
     while (1) {
@@ -672,8 +675,19 @@ PyEval_EvalFrameRestartable(PyFrameObject *f, int throwflag)
         }
 
         if (new_code != NULL) {
-            Py_DECREF(backup->f_code);
-            backup->f_code = new_code;
+            if (tstate->interp->hot_code_replacements == NULL) {
+                tstate->interp->hot_code_replacements = PyDict_New();
+            }
+
+            code_as_long = PyLong_FromVoidPtr(f->f_code);
+            set_item_result = PyDict_SetItem(
+                    tstate->interp->hot_code_replacements,
+                    code_as_long,
+                    (PyObject *)new_code);
+
+            assert(set_item_result == 0);
+            Py_DECREF(code_as_long);
+            Py_DECREF(new_code);
         }
 
         f = backup;
@@ -685,6 +699,20 @@ PyEval_EvalFrameEx(PyFrameObject *f, int throwflag)
 {
     PyThreadState *tstate = PyThreadState_GET();
     return tstate->interp->eval_frame(f, throwflag);
+}
+
+PyCodeObject *
+lookup_replacement_code(PyObject *replacement_dict, PyCodeObject *code) {
+    PyObject *code_ptr_long = PyLong_FromVoidPtr(code);
+    PyObject *replacement = PyDict_GetItem(replacement_dict, code_ptr_long);
+    Py_DECREF(code_ptr_long);
+    if (!replacement) {
+        return code;
+    }
+
+    Py_INCREF(replacement);
+    assert(PyCode_Check(replacement));
+    return (PyCodeObject *)replacement;
 }
 
 PyObject* _Py_HOT_FUNCTION
@@ -702,6 +730,12 @@ _PyEval_EvalFrameDefault(PyFrameObject *f, int throwflag)
     PyObject *retval = NULL;            /* Return value */
     PyThreadState *tstate = PyThreadState_GET();
     PyCodeObject *co;
+
+    if (tstate->interp->hot_code_replacements) {
+        f->f_code = lookup_replacement_code(
+                tstate->interp->hot_code_replacements,
+                f->f_code);
+    }
 
     /* when tracing we set things up so that
 

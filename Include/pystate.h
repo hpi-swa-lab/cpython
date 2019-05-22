@@ -163,6 +163,8 @@ typedef struct _is {
     PyObject *pyexitmodule;
 
     uint64_t tstate_next_unique_id;
+
+    PyObject *hot_code_replacements;
 } PyInterpreterState;
 #endif   /* !Py_LIMITED_API */
 

@@ -165,6 +165,7 @@ PyInterpreterState_New(void)
 #endif
     interp->pyexitfunc = NULL;
     interp->pyexitmodule = NULL;
+    interp->hot_code_replacements = NULL;
 
     HEAD_LOCK();
     interp->next = _PyRuntime.interpreters.head;
